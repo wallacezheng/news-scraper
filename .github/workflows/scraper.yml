@@ -1,0 +1,26 @@
+name: Article Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天 UTC 00:00 = 台灣時間早上 08:00
+  workflow_dispatch:       # 允許手動觸發
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: python scraper.py
