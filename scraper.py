@@ -229,8 +229,8 @@ def generate_html(pages: list[dict]):
         pub_date = ""
         if date_prop and date_prop.get("start"):
             pub_date = date_prop["start"][:10]
-        else:
-            print(f"  [DEBUG] no date for: {title[:30]} | date_prop={date_prop}")
+        elif page.get("created_time"):
+            pub_date = page["created_time"][:10]
         articles.append({"title": title, "url": url, "source": source_name, "date": pub_date})
 
     articles.sort(key=lambda x: x["date"], reverse=True)
