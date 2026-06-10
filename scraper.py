@@ -68,7 +68,7 @@ def fetch_techbang():
         container = a.find_parent(["article", "li", "div"])
         published = None
         if container:
-            ts = container.find(class_=re.compile(r"timestamp|date|time"))
+            ts = container.find(class_=re.compile(r"timestamp|date|time|author-info|author"))
             if ts:
                 raw = ts.get_text(strip=True)
                 m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{2}):(\d{2})", raw)
@@ -227,12 +227,8 @@ def generate_html(pages: list[dict]):
         source_name = source.get("name", "")
         date_prop = page["properties"].get("發布時間", {}).get("date")
         pub_date = ""
-        if date_prop:
-            try:
-                d = datetime.fromisoformat(date_prop["start"].replace("Z", "+00:00"))
-                pub_date = d.strftime("%Y-%m-%d")
-            except ValueError:
-                pass
+        if date_prop and date_prop.get("start"):
+            pub_date = date_prop["start"][:10]
         articles.append({"title": title, "url": url, "source": source_name, "date": pub_date})
 
     articles.sort(key=lambda x: x["date"], reverse=True)
