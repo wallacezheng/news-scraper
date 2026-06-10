@@ -3,7 +3,12 @@ name: Article Scraper
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天 UTC 00:00 = 台灣時間早上 08:00
-  workflow_dispatch:       # 允許手動觸發
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   scrape:
@@ -24,3 +29,11 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: python scraper.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          include_files: index.html
