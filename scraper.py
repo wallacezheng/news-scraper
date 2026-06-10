@@ -1,6 +1,6 @@
 """
 網站文章爬取 → Notion 同步腳本
-目標：wattbrother.com/c/news, hero-mi.com, techbang.com/categories/76
+目標：hero-mi.com, techbang.com/categories/76
 """
 
 import os
@@ -9,7 +9,6 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
-from notion_client import Client
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,14 +16,18 @@ load_dotenv()
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 
-notion = Client(auth=NOTION_TOKEN)
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/125.0.0.0 Safari/537.36"
     )
+}
+
+NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Content-Type": "application/json",
+    "Notion-Version": "2022-06-28",
 }
 
 
@@ -47,46 +50,6 @@ def fetch_heromi():
     return articles
 
 
-def fetch_wattbrother():
-    """wattbrother.com/c/news — BeautifulSoup"""
-    resp = requests.get("https://wattbrother.com/c/news", headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    articles = []
-    # 文章連結格式：//wattbrother.com/數字
-    for a in soup.find_all("a", href=re.compile(r"^//wattbrother\.com/\d+")):
-        title = a.get_text(strip=True)
-        if not title:
-            continue
-        url = "https:" + a["href"]
-
-        # 日期在同一個父層級的文字節點，格式 YYYY-MM-DD
-        parent = a.parent
-        date_text = None
-        for text in parent.stripped_strings:
-            if re.match(r"\d{4}-\d{2}-\d{2}", text):
-                date_text = text
-                break
-
-        published = None
-        if date_text:
-            try:
-                published = datetime.strptime(date_text, "%Y-%m-%d").replace(
-                    tzinfo=timezone.utc
-                ).isoformat()
-            except ValueError:
-                pass
-
-        articles.append({
-            "source": "wattbrother.com",
-            "title": title,
-            "url": url,
-            "published": published,
-        })
-    return articles
-
-
 def fetch_techbang():
     """techbang.com/categories/76 — BeautifulSoup"""
     resp = requests.get(
@@ -102,14 +65,12 @@ def fetch_techbang():
             continue
         url = "https://www.techbang.com" + a["href"] if a["href"].startswith("/") else a["href"]
 
-        # 找鄰近的 timestamp
         container = a.find_parent(["article", "li", "div"])
         published = None
         if container:
             ts = container.find(class_=re.compile(r"timestamp|date|time"))
             if ts:
                 raw = ts.get_text(strip=True)
-                # 格式：2026年6月10日 07:30
                 m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{2}):(\d{2})", raw)
                 if m:
                     try:
@@ -128,7 +89,6 @@ def fetch_techbang():
             "published": published,
         })
 
-    # 去除重複 URL
     seen = set()
     unique = []
     for a in articles:
@@ -138,25 +98,33 @@ def fetch_techbang():
     return unique
 
 
-# ── Notion 操作 ───────────────────────────────────────────────
+# ── Notion 操作（直接呼叫 HTTP API）─────────────────────────────
 
 def get_existing_urls() -> set[str]:
     """取得 Notion Database 中已存在的所有文章 URL"""
     existing = set()
-    cursor = None
+    payload = {"page_size": 100}
+
     while True:
-        kwargs = {"database_id": NOTION_DATABASE_ID, "page_size": 100}
-        if cursor:
-            kwargs["start_cursor"] = cursor
-        resp = notion.databases.query(**kwargs)
-        for page in resp["results"]:
+        resp = requests.post(
+            f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query",
+            headers=NOTION_HEADERS,
+            json=payload,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        for page in data.get("results", []):
             url_prop = page["properties"].get("URL", {})
             url = url_prop.get("url") or ""
             if url:
                 existing.add(url)
-        if not resp.get("has_more"):
+
+        if not data.get("has_more"):
             break
-        cursor = resp["next_cursor"]
+        payload["start_cursor"] = data["next_cursor"]
+
     return existing
 
 
@@ -170,10 +138,13 @@ def add_article(article: dict):
     if article.get("published"):
         props["發布時間"] = {"date": {"start": article["published"]}}
 
-    notion.pages.create(
-        parent={"database_id": NOTION_DATABASE_ID},
-        properties=props,
+    resp = requests.post(
+        "https://api.notion.com/v1/pages",
+        headers=NOTION_HEADERS,
+        json={"parent": {"database_id": NOTION_DATABASE_ID}, "properties": props},
+        timeout=15,
     )
+    resp.raise_for_status()
 
 
 # ── 主流程 ────────────────────────────────────────────────────
